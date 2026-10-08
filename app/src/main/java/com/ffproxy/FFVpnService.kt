@@ -48,21 +48,22 @@ class FFVpnService : VpnService() {
             .setSession("FFProxy")
             .setMtu(1500)
 
-        // DO NOT exclude FF apps — their traffic needs to enter the tunnel
         listOf(
             "com.google.android.gms",
             "com.google.android.gsf",
             "com.android.vending"
         ).forEach { try { builder.addDisallowedApplication(it) } catch (_: Exception) {} }
 
-        // full tunnel — PacketRouter filters inside
         builder.addRoute("0.0.0.0", 0)
 
-        // bypass FF config/version server — goes direct, never hits proxy
-        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
-            builder.excludeRoutes(
-                listOf(android.net.IpPrefix(java.net.InetAddress.getByName("202.81.96.54"), 32))
-            )
+        if (android.os.Build.VERSION.SDK_INT >= 33) {
+            try {
+                val prefix = android.net.IpPrefix(
+                    java.net.InetAddress.getByName("202.81.96.54"), 32
+                )
+                val method = builder.javaClass.getMethod("excludeRoutes", List::class.java)
+                method.invoke(builder, listOf(prefix))
+            } catch (_: Exception) {}
         }
 
         tun = builder.establish() ?: return
