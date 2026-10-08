@@ -48,25 +48,13 @@ class FFVpnService : VpnService() {
             .setSession("FFProxy")
             .setMtu(1500)
 
-        listOf(
-            "com.google.android.gms",
-            "com.google.android.gsf",
-            "com.android.vending"
-        ).forEach {
-            try { builder.addDisallowedApplication(it) } catch (e: Exception) {}
-        }
+        // tunnel only this app — everything else including FF goes direct
+        // FF UDP/10012 intercepted at socket level in ProxyCore via SocketHook
+        try {
+            builder.addAllowedApplication(packageName)
+        } catch (e: Exception) {}
 
         builder.addRoute("0.0.0.0", 0)
-
-        if (android.os.Build.VERSION.SDK_INT >= 33) {
-            try {
-                val prefix = android.net.IpPrefix(
-                    java.net.InetAddress.getByName("202.81.96.54"), 32
-                )
-                val method = builder.javaClass.getMethod("excludeRoutes", List::class.java)
-                method.invoke(builder, listOf(prefix))
-            } catch (e: Exception) {}
-        }
 
         tun = builder.establish() ?: return
         running = true
