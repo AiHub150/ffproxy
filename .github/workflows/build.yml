@@ -22,11 +22,11 @@ jobs:
           echo "$PWD/gradle-8.1/bin" >> $GITHUB_PATH
 
       - name: Build APK
-        run: gradle assembleRelease --no-daemon
+        run: gradle assembleDebug --no-daemon
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: FFProxy-release
-          path: app/build/outputs/apk/release/*.apk
+          name: FFProxy-debug
+          path: app/build/outputs/apk/debug/*.apk
           if-no-files-found: warn
