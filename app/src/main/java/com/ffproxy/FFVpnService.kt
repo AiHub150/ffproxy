@@ -58,7 +58,7 @@ class FFVpnService : VpnService() {
         } catch (e: Exception) {}
 
         // exclude common system apps
-                listOf(
+            listOf(
             "com.google.android.gms",
             "com.google.android.gsf",
             "com.android.vending"
