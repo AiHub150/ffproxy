@@ -1,3 +1,5 @@
+// lang: Kotlin, file: ProxyCore.kt — full replacement
+
 package com.ffproxy
 
 import android.net.VpnService
@@ -15,12 +17,10 @@ object ProxyCore {
         localSocket = DatagramSocket(localPort)
         outSocket = DatagramSocket().also { svc.protect(it) }
 
-        val garenaAddr = InetAddress.getByName("185.60.112.157")
-        val garenaPort = FFVpnService.FF_SERVER_PORT
-
         var clientAddr: InetAddress? = null
         var clientPort = 0
 
+        // inbound from tun → out to real server
         Thread {
             val buf = ByteArray(65535)
             while (running.get()) {
@@ -29,13 +29,24 @@ object ProxyCore {
                     localSocket!!.receive(pkt)
                     clientAddr = pkt.address
                     clientPort = pkt.port
+
                     val data = pkt.data.copyOf(pkt.length)
                     PacketParser.parseInbound(data)
-                    outSocket!!.send(DatagramPacket(data, data.size, garenaAddr, garenaPort))
+
+                    // look up original dst for this src port
+                    val dst = PacketRouter.destinations[clientPort]
+                    val dstAddr = if (dst != null)
+                        InetAddress.getByAddress(dst.first)
+                    else
+                        InetAddress.getByName("185.60.112.157")   // fallback
+                    val dstPort = dst?.second ?: FFVpnService.FF_SERVER_PORT
+
+                    outSocket!!.send(DatagramPacket(data, data.size, dstAddr, dstPort))
                 } catch (e: Exception) { continue }
             }
         }.start()
 
+        // inbound from real server → back to game
         Thread {
             val buf = ByteArray(65535)
             while (running.get()) {
