@@ -19,8 +19,9 @@ jobs:
         uses: gradle/gradle-build-action@v2
 
       - name: Grant Gradle permission
-        run: chmod +x gradlew
-        ls -la gradlew
+        run: |
+          chmod +x gradlew
+          ls -la gradlew
 
       - name: Build APK
         run: ./gradlew assembleRelease --no-daemon
