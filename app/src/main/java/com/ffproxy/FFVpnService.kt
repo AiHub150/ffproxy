@@ -1,4 +1,4 @@
-// lang: Kotlin, file: FFVpnService.kt, target: Android API 26+, AGP
+// lang: Kotlin, file: FFVpnService.kt, target: Android API 26+
 
 package com.ffproxy
 
@@ -48,49 +48,9 @@ class FFVpnService : VpnService() {
             .setSession("FFProxy")
             .setMtu(1500)
 
+        // system apps bypass tunnel — their traffic is irrelevant to us
         listOf(
             "com.google.android.gms",
             "com.google.android.gsf",
             "com.android.vending"
-        ).forEach { try { builder.addDisallowedApplication(it) } catch (_: Exception) {} }
-
-        builder.addRoute("0.0.0.0", 0)
-
-        if (android.os.Build.VERSION.SDK_INT >= 33) {
-            try {
-                val prefix = android.net.IpPrefix(
-                    java.net.InetAddress.getByName("202.81.96.54"), 32
-                )
-                val method = builder.javaClass.getMethod("excludeRoutes", List::class.java)
-                method.invoke(builder, listOf(prefix))
-            } catch (_: Exception) {}
-        }
-
-        tun = builder.establish() ?: return
-        running = true
-
-        val input  = FileInputStream(tun!!.fileDescriptor)
-        val output = FileOutputStream(tun!!.fileDescriptor)
-
-        Thread { ProxyCore.start(this, LOCAL_PROXY_PORT) }.start()
-
-        Thread {
-            val buf = ByteArray(32767)
-            while (running) {
-                try {
-                    val len = input.read(buf)
-                    if (len <= 0) continue
-                    val packet = buf.copyOf(len)
-                    val modified = PacketRouter.route(packet)
-                    output.write(modified ?: packet)
-                } catch (_: Exception) { continue }
-            }
-        }.start()
-    }
-
-    override fun onDestroy() {
-        running = false
-        tun?.close()
-        ProxyCore.stop()
-    }
-}
+        ).forEach { try { builder.addDisallowedApplication(it) }
