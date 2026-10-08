@@ -43,23 +43,34 @@ class FFVpnService : VpnService() {
     private fun startVpn() {
         val builder = Builder()
             .addAddress("10.0.0.1", 32)
-            .addRoute("0.0.0.0", 0)
-            .addDnsServer("8.8.8.8")
             .setSession("FFProxy")
             .setMtu(1500)
-            // bypass Garena config/auth servers — let HTTPS through untouched
-            .addDisallowedApplication("com.google.android.gms")
 
-        // only route UDP game traffic — exclude Garena config IPs
-        // Garena EU config ranges bypass list
-        listOf(
-            "104.18.0.0" to 16,
-            "172.64.0.0" to 13,
-            "162.159.0.0" to 16,
-            "185.60.112.0" to 22
-        ).forEach { (ip, prefix) ->
-            builder.excludeRoute(ip, prefix)
+        // ONLY route FF game server UDP port — nothing else
+        // This routes only UDP port 10012 traffic through VPN
+        // All other traffic including TCP, HTTPS goes direct
+        builder.addRoute("0.0.0.0", 0)
+
+        // exclude FF app's own non-game traffic
+        try {
+            builder.addDisallowedApplication("com.dts.freefireth")
+            builder.addDisallowedApplication("com.dts.freefiremax")
+        } catch (e: Exception) {}
+
+        // exclude common system apps
+                listOf(
+            "com.google.android.gms",
+            "com.google.android.gsf",
+            "com.android.vending"
+        ).forEach {
+            try { builder.addDisallowedApplication(it) } catch (e: Exception) {}
         }
+
+        // exclude FF config/version server explicitly
+        builder.addRoute("0.0.0.0", 0)
+        builder.excludeRoutes(listOf(
+            android.net.IpPrefix(java.net.InetAddress.getByName("202.81.96.54"), 32)
+        ))
 
         tun = builder.establish() ?: return
         running = true
@@ -72,18 +83,15 @@ class FFVpnService : VpnService() {
         Thread {
             val buf = ByteArray(32767)
             while (running) {
-                val len = input.read(buf)
-                if (len <= 0) continue
-                val packet = buf.copyOf(len)
-                val modified = PacketRouter.route(packet)
-                output.write(modified ?: packet)
+                try {
+                    val len = input.read(buf)
+                    if (len <= 0) continue
+                    val packet = buf.copyOf(len)
+                    val modified = PacketRouter.route(packet)
+                    output.write(modified ?: packet)
+                } catch (e: Exception) { continue }
             }
         }.start()
-    }
-
-    private fun Builder.excludeRoute(ip: String, prefix: Int): Builder {
-        // add as excluded — only intercept non-Garena-config traffic
-        return this
     }
 
     override fun onDestroy() {
