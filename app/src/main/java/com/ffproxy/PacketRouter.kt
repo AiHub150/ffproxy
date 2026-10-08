@@ -1,4 +1,4 @@
-// lang: Kotlin, file: PacketRouter.kt — full replacement
+// lang: Kotlin, file: PacketRouter.kt, target: Android API 26+
 
 package com.ffproxy
 
@@ -9,7 +9,7 @@ object PacketRouter {
     private const val LOCAL_PROXY_PORT = FFVpnService.LOCAL_PROXY_PORT
     private const val FF_PORT = FFVpnService.FF_SERVER_PORT
 
-    // srcPort → original (dstIp, dstPort) before rewrite
+    // srcPort → (originalDstIp, originalDstPort)
     val destinations = ConcurrentHashMap<Int, Pair<ByteArray, Int>>()
 
     fun route(packet: ByteArray): ByteArray? {
@@ -19,7 +19,7 @@ object PacketRouter {
         if (ipVersion != 4) return packet          // non-IPv4 — pass
 
         val proto = packet[9].toInt() and 0xFF
-        if (proto != 17) return packet             // non-UDP — pass
+        if (proto != 17) return packet             // non-UDP — pass through untouched
 
         val ihl = (packet[0].toInt() and 0xF) * 4
         if (packet.size < ihl + 8) return packet
@@ -27,7 +27,7 @@ object PacketRouter {
         val dstPort = ((packet[ihl + 2].toInt() and 0xFF) shl 8) or
                       (packet[ihl + 3].toInt() and 0xFF)
 
-        if (dstPort != FF_PORT) return packet      // not game port — pass untouched
+        if (dstPort != FF_PORT) return packet      // wrong port — pass through
 
         // save original dst before rewrite
         val srcPort = ((packet[ihl].toInt() and 0xFF) shl 8) or
@@ -36,7 +36,9 @@ object PacketRouter {
         destinations[srcPort] = Pair(origDstIp, dstPort)
 
         val modified = packet.copyOf()
+        // rewrite dst IP to tun interface
         modified[16] = 10; modified[17] = 0; modified[18] = 0; modified[19] = 1
+        // rewrite dst port to local proxy
         modified[ihl + 2] = (LOCAL_PROXY_PORT shr 8).toByte()
         modified[ihl + 3] = (LOCAL_PROXY_PORT and 0xFF).toByte()
         recomputeChecksum(modified, ihl)
