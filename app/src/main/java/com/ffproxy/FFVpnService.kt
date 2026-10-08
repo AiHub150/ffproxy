@@ -17,9 +17,9 @@ class FFVpnService : VpnService() {
     @Volatile private var running = false
 
     companion object {
-        const val FF_SERVER_PORT = 10012
+        const val FF_SERVER_PORT   = 10012
         const val LOCAL_PROXY_PORT = 19999
-        const val CHANNEL_ID = "ffproxy_channel"
+        const val CHANNEL_ID       = "ffproxy_channel"
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -48,9 +48,51 @@ class FFVpnService : VpnService() {
             .setSession("FFProxy")
             .setMtu(1500)
 
-        // system apps bypass tunnel — their traffic is irrelevant to us
         listOf(
             "com.google.android.gms",
             "com.google.android.gsf",
             "com.android.vending"
-        ).forEach { try { builder.addDisallowedApplication(it) }
+        ).forEach {
+            try { builder.addDisallowedApplication(it) } catch (e: Exception) {}
+        }
+
+        builder.addRoute("0.0.0.0", 0)
+
+        if (android.os.Build.VERSION.SDK_INT >= 33) {
+            try {
+                val prefix = android.net.IpPrefix(
+                    java.net.InetAddress.getByName("202.81.96.54"), 32
+                )
+                val method = builder.javaClass.getMethod("excludeRoutes", List::class.java)
+                method.invoke(builder, listOf(prefix))
+            } catch (e: Exception) {}
+        }
+
+        tun = builder.establish() ?: return
+        running = true
+
+        val input  = FileInputStream(tun!!.fileDescriptor)
+        val output = FileOutputStream(tun!!.fileDescriptor)
+
+        Thread { ProxyCore.start(this, LOCAL_PROXY_PORT) }.start()
+
+        Thread {
+            val buf = ByteArray(32767)
+            while (running) {
+                try {
+                    val len = input.read(buf)
+                    if (len <= 0) continue
+                    val packet   = buf.copyOf(len)
+                    val modified = PacketRouter.route(packet)
+                    output.write(modified ?: packet)
+                } catch (e: Exception) { continue }
+            }
+        }.start()
+    }
+
+    override fun onDestroy() {
+        running = false
+        tun?.close()
+        ProxyCore.stop()
+    }
+}
