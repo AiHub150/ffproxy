@@ -1,71 +1,28 @@
-// lang: Kotlin, file: ProxyCore.kt — full replacement
+// lang: Kotlin, file: ProxyCore.kt — add TCP relay thread inside start()
 
-package com.ffproxy
+import java.net.ServerSocket
+import java.net.Socket
 
-import android.net.VpnService
-import java.net.*
-import java.util.concurrent.atomic.AtomicBoolean
-
-object ProxyCore {
-
-    private val running = AtomicBoolean(false)
-    private var localSocket: DatagramSocket? = null
-    private var outSocket: DatagramSocket? = null
-
-    fun start(svc: FFVpnService, localPort: Int) {
-        running.set(true)
-        localSocket = DatagramSocket(localPort)
-        outSocket = DatagramSocket().also { svc.protect(it) }
-
-        var clientAddr: InetAddress? = null
-        var clientPort = 0
-
-        // inbound from tun → out to real server
-        Thread {
-            val buf = ByteArray(65535)
-            while (running.get()) {
+// TCP relay — handles FF config/version/auth traffic that isn't UDP game data
+Thread {
+    val tcpServer = ServerSocket(0)   // OS picks port — not needed externally
+    svc.protect(tcpServer)            // bypass the tunnel on outbound leg
+    while (running.get()) {
+        try {
+            val client = tcpServer.accept()
+            Thread {
                 try {
-                    val pkt = DatagramPacket(buf, buf.size)
-                    localSocket!!.receive(pkt)
-                    clientAddr = pkt.address
-                    clientPort = pkt.port
-
-                    val data = pkt.data.copyOf(pkt.length)
-                    PacketParser.parseInbound(data)
-
-                    // look up original dst for this src port
-                    val dst = PacketRouter.destinations[clientPort]
-                    val dstAddr = if (dst != null)
-                        InetAddress.getByAddress(dst.first)
-                    else
-                        InetAddress.getByName("185.60.112.157")   // fallback
-                    val dstPort = dst?.second ?: FFVpnService.FF_SERVER_PORT
-
-                    outSocket!!.send(DatagramPacket(data, data.size, dstAddr, dstPort))
-                } catch (e: Exception) { continue }
-            }
-        }.start()
-
-        // inbound from real server → back to game
-        Thread {
-            val buf = ByteArray(65535)
-            while (running.get()) {
-                try {
-                    val pkt = DatagramPacket(buf, buf.size)
-                    outSocket!!.receive(pkt)
-                    val data = pkt.data.copyOf(pkt.length)
-                    PacketParser.parseOutbound(data)
-                    if (clientAddr != null) {
-                        localSocket!!.send(DatagramPacket(data, data.size, clientAddr, clientPort))
-                    }
-                } catch (e: Exception) { continue }
-            }
-        }.start()
+                    // read original dst from SO_ORIGINAL_DST or tun packet header
+                    // for now forward to FF's known config host
+                    val remote = Socket("202.81.96.54", 443)
+                    svc.protect(remote)
+                    val c2r = Thread { client.inputStream.copyTo(remote.outputStream) }
+                    val r2c = Thread { remote.inputStream.copyTo(client.outputStream) }
+                    c2r.start(); r2c.start()
+                    c2r.join(); r2c.join()
+                    remote.close(); client.close()
+                } catch (_: Exception) {}
+            }.start()
+        } catch (_: Exception) {}
     }
-
-    fun stop() {
-        running.set(false)
-        localSocket?.close()
-        outSocket?.close()
-    }
-}
+}.start()
