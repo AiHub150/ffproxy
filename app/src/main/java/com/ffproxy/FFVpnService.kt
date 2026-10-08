@@ -1,3 +1,5 @@
+// lang: Kotlin, file: FFVpnService.kt, target: Android API 26+, AGP
+
 package com.ffproxy
 
 import android.app.Notification
@@ -12,7 +14,7 @@ import java.io.FileOutputStream
 class FFVpnService : VpnService() {
 
     private var tun: ParcelFileDescriptor? = null
-    private var running = false
+    @Volatile private var running = false
 
     companion object {
         const val FF_SERVER_PORT = 10012
@@ -46,36 +48,27 @@ class FFVpnService : VpnService() {
             .setSession("FFProxy")
             .setMtu(1500)
 
-        // ONLY route FF game server UDP port — nothing else
-        // This routes only UDP port 10012 traffic through VPN
-        // All other traffic including TCP, HTTPS goes direct
-        builder.addRoute("0.0.0.0", 0)
-
-        // exclude FF app's own non-game traffic
-        try {
-            builder.addDisallowedApplication("com.dts.freefireth")
-            builder.addDisallowedApplication("com.dts.freefiremax")
-        } catch (e: Exception) {}
-
-        // exclude common system apps
-            listOf(
+        // DO NOT exclude FF apps — their traffic needs to enter the tunnel
+        listOf(
             "com.google.android.gms",
             "com.google.android.gsf",
             "com.android.vending"
-        ).forEach {
-            try { builder.addDisallowedApplication(it) } catch (e: Exception) {}
-        }
+        ).forEach { try { builder.addDisallowedApplication(it) } catch (_: Exception) {} }
 
-        // exclude FF config/version server explicitly
+        // full tunnel — PacketRouter filters inside
         builder.addRoute("0.0.0.0", 0)
-        builder.excludeRoutes(listOf(
-            android.net.IpPrefix(java.net.InetAddress.getByName("202.81.96.54"), 32)
-        ))
+
+        // bypass FF config/version server — goes direct, never hits proxy
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
+            builder.excludeRoutes(
+                listOf(android.net.IpPrefix(java.net.InetAddress.getByName("202.81.96.54"), 32))
+            )
+        }
 
         tun = builder.establish() ?: return
         running = true
 
-        val input = FileInputStream(tun!!.fileDescriptor)
+        val input  = FileInputStream(tun!!.fileDescriptor)
         val output = FileOutputStream(tun!!.fileDescriptor)
 
         Thread { ProxyCore.start(this, LOCAL_PROXY_PORT) }.start()
@@ -89,7 +82,7 @@ class FFVpnService : VpnService() {
                     val packet = buf.copyOf(len)
                     val modified = PacketRouter.route(packet)
                     output.write(modified ?: packet)
-                } catch (e: Exception) { continue }
+                } catch (_: Exception) { continue }
             }
         }.start()
     }
