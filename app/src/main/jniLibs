@@ -1,0 +1,3 @@
+ffproxy/
+└── app/src/main/jniLibs/arm64-v8a/
+    └── libbox.so          ← aus dem Drip APK (lib/arm64-v8a/libbox.so)
